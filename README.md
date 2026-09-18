@@ -40,13 +40,35 @@ Before installing the Python packages, install these first:
 
 ## 📦 Installation
 
-Open a terminal in this project folder and run:
+> **Required:** Python 3.10, 3.11 or **3.12** (64-bit). Do not use Python 3.13/3.14 —
+> core packages (torch, pygame, webrtcvad-wheels) don't publish wheels for them yet.
+> Download from [python.org](https://www.python.org/downloads/) and tick **"Add Python to PATH"**.
+
+### Windows — one-click setup (recommended)
+
+Double-click **`setup_windows.bat`**. It creates a `.venv`, installs every
+dependency from the pinned lockfile, handles the resemblyzer/webrtcvad quirk,
+asks about the optional local voice-cloning engine, and checks for Ollama.
+
+### Manual install
+
+To see exactly what gets installed, read `requirements.txt`. To reproduce the
+exact pinned environment, use the full lockfile:
 
 ```
-pip install -r requirements.txt
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+pip install webrtcvad-wheels==2.0.14        # binary wheel, avoids MSVC build
+pip install -r requirements-lock.txt       # every package pinned
+pip install resemblyzer==0.1.4 --no-deps --no-build-isolation
 ```
 
-This installs everything with exact versions known to work. It will download several large packages (PyTorch, Whisper, etc.), so it may take a few minutes.
+(`resemblyzer` is installed separately because its obsolete `webrtcvad>=2.0.10`
+dependency only ships as source and would force a Microsoft Visual C++ build;
+`webrtcvad-wheels` supplies the same module.)
+
+It will download several large packages (PyTorch, Whisper, etc.), so it may
+take a few minutes.
 
 > **Note:** The first time you use Whisper (speech-to-text) it downloads a small model automatically (~75MB).
 
@@ -116,7 +138,7 @@ python check_db.py
 
 | Problem | Fix |
 |---|---|
-| `ModuleNotFoundError` on startup | Make sure you ran `pip install -r requirements.txt` |
+| `ModuleNotFoundError` on startup | Make sure setup completed: run `setup_windows.bat` (or `pip install -r requirements-lock.txt`) |
 | "Cannot connect to Ollama" error | Ollama isn't running. Start the Ollama app, then check `ollama list` shows `qwen2.5:3b` |
 | No microphone audio / silence | Check your default microphone in Windows sound settings |
 | Whisper model download fails | Re-run — it resumes. Or check internet connection |
@@ -129,14 +151,16 @@ python check_db.py
 ```
 voice-agent/
 ├── main.py              # CLI entry point
-├── requirements.txt     # Python dependencies (pinned)
+├── setup_windows.bat    # one-click installer (creates .venv, installs deps)
+├── requirements.txt     # pinned dependencies (Python 3.10-3.12)
+├── requirements-lock.txt# full locked dependency tree (reproducible install)
 ├── agent/               # LLM client, memory, orchestration harness
 ├── audio/               # STT, TTS, VAD
 ├── auth/                # Voice verification/enrollment
 ├── db/                  # Database session + models
 ├── ui/                  # Streamlit web UI + bridge
 ├── api/                 # (planned) REST API
-└── data/                # Runtime data (db, profiles, recordings)
+└── data/                # Runtime data (db, profiles, recordings) - not shared
 ```
 
 ---
