@@ -162,7 +162,7 @@ class AgentHarness:
                                 and (interrupt_speech_samples - interrupt_last_check_samples) >= 2000):
                             interrupt_last_check_samples = interrupt_speech_samples
                             candidate_audio = np.concatenate(interrupt_buffer)
-                            is_auth, score = self.verifier.verify(candidate_audio, min_threshold=0.58)
+                            is_auth, score = self.verifier.verify(candidate_audio, min_threshold=self.verifier.interrupt_threshold)
 
                             if is_auth:
                                 # CANDIDATE INTERRUPT CONFIRMED!
@@ -255,8 +255,9 @@ class AgentHarness:
                         if silence_counter >= silence_limit or sample_counter >= max_samples:
                             full_audio = np.concatenate(audio_buffer)
                             if len(full_audio) >= 4800:
-                                # Clear any stale backlog
-                                while not self.audio_queue.empty():
+                                # Drain stale backlog when the queue is full, so a
+                                # flood of old clips can never starve new speech.
+                                while self.audio_queue.qsize() >= 3:
                                     try:
                                         self.audio_queue.get_nowait()
                                     except queue.Empty:
@@ -349,15 +350,23 @@ class AgentHarness:
                 est_duration = max(1.0, len(assistant_text.split()) * 0.35)
                 time.sleep(est_duration)
             else:
-                # Standalone CLI mode: Play on physical speakers with live interrupt support
-                self.state = AgentState.SPEAKING
-                self.tts_stop_event.clear()
+                # Standalone CLI mode: Play on physical speakers with live interrupt.
+                # CRITICAL: synthesize FIRST while state == PROCESSING, so the mic
+                # listener discards everything during generation (no queue flooding,
+                # no false "captured noise" clips). Only switch to SPEAKING for the
+                # actual playback, where real barge-in is meaningful.
+                self.state = AgentState.PROCESSING
 
-                print(f"🔊 [TTS] Starting playback ({detected_lang})...")
-                self.tts.speak(assistant_text, self.tts_stop_event, language=detected_lang)
+                generated = self.tts.generate_audio_file(assistant_text, language=detected_lang)
+                if generated:
+                    self.state = AgentState.SPEAKING
+                    self.tts_stop_event.clear()
 
-                # Brief echo clearing pause
-                time.sleep(0.2)
+                    print(f"🔊 [TTS] Starting playback ({detected_lang})...")
+                    self.tts.play(self.tts_stop_event)
+
+                    # Brief echo clearing pause
+                    time.sleep(0.2)
 
             # Reset
             self.state = AgentState.IDLE

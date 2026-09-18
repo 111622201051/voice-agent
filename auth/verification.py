@@ -12,10 +12,13 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class SpeakerVerifier:
-    def __init__(self, threshold=0.60):
+    def __init__(self, threshold=0.60, interrupt_threshold=0.50):
         logger.info("Loading Speaker Verification model...")
         self.encoder = VoiceEncoder()
         self.threshold = threshold
+        # Relaxed cut-off for quick barge-in checks, where only ~0.5s of audio
+        # is available (short interruptions naturally score lower).
+        self.interrupt_threshold = interrupt_threshold
         self.profile_path = os.path.join(BASE_DIR, "data", "voice_profiles", "my_voice.pkl")
         self.embeddings = []  # List of voice fingerprints
         logger.info("✅ Speaker Verification model loaded.")

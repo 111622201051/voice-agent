@@ -67,6 +67,7 @@ class TextToSpeech:
         self.clone_prompt_text = ""
         self.enable_voice_clone = True
         self.clone_from_verified_speech = True
+        self.require_gpu_for_clone = True
 
         # Load configuration from config.yaml if available
         config_path = os.path.join(PROJECT_DIR, "config.yaml")
@@ -78,6 +79,7 @@ class TextToSpeech:
                     tts_cfg = cfg.get("tts", {})
                     self.enable_voice_clone = bool(tts_cfg.get("enable_voice_clone", True))
                     self.clone_from_verified_speech = bool(tts_cfg.get("clone_from_verified_speech", True))
+                    self.require_gpu_for_clone = bool(tts_cfg.get("require_gpu_for_clone", True))
                     if not api_key:
                         api_key = tts_cfg.get("fish_api_key", "")
                     if base_url == "https://api.fish.audio":
@@ -161,8 +163,16 @@ class TextToSpeech:
         return False
 
     def _generate_local_f5(self, text: str) -> bool:
-        """Generates 100% offline zero-shot cloned voice using local F5-TTS model."""
+        """Generates 100% offline zero-shot cloned voice using local F5-TTS model.
+
+        Refuses to run on CPU: F5-TTS diffusion synthesis takes ~10 minutes per
+        reply without a GPU, which stalls the whole agent. Falls back to the
+        fast Edge-TTS / Fish Audio path instead.
+        """
         if not F5_TTS_AVAILABLE or not os.path.exists(CLONE_AUDIO_PATH):
+            return False
+        if self.require_gpu_for_clone and not torch.cuda.is_available():
+            print("ℹ️  [TTS] Skipped local voice cloning - no NVIDIA GPU found (CPU synth is ~10 min/reply).")
             return False
 
         try:
@@ -261,18 +271,22 @@ class TextToSpeech:
                 chunks.append(chunk["data"])
         return b"".join(chunks)
 
-    def speak(self, text: str, stop_event: threading.Event, language: str = None):
-        """Generates and plays speech with live interrupt/barge-in support."""
-        if not text:
-            return
+    def generate_audio_file(self, text: str, language: str = None) -> bool:
+        """Generates speech audio into self.temp_file (NO playback).
 
-        # Ensure any previous audio is completely stopped and unloaded before starting new
+        Returns True if an audio file was produced. Never blocks on the local
+        clone engine unless it is actually viable (GPU path).
+        """
+        if not text:
+            return False
+
         self.stop_playback()
 
         print(f"🔊 [TTS] Generating voice reply ({language or 'auto'})...")
         success = False
 
-        # 1. Try Local Zero-Shot Voice Cloning (100% Free & Offline)
+        # 1. Try Local Zero-Shot Voice Cloning (only viable on GPU - CPU is
+        #    thousands of times too slow, see require_gpu_for_clone).
         if self.enable_voice_clone and self.clone_ref_bytes and language not in ["ta"]:
             print("🎭 [TTS] Synthesizing speech with Local Cloned Voice Profile...")
             success = self._generate_local_f5(text)
@@ -289,10 +303,15 @@ class TextToSpeech:
             print(f"ℹ️  [TTS] (Using Edge-TTS: {selected_voice}).")
             try:
                 asyncio.run(self._generate_edge_fallback(text, voice=selected_voice, language=language))
+                success = True
             except Exception as e:
                 logger.error(f"TTS generation failed: {e}")
-                return
+                return False
 
+        return success
+
+    def play(self, stop_event: threading.Event):
+        """Plays the already-generated audio with live interrupt/barge-in support."""
         print("🔊 [TTS] Playing audio...")
         try:
             pygame.mixer.music.load(self.temp_file)
@@ -311,3 +330,10 @@ class TextToSpeech:
         except Exception as e:
             logger.error(f"TTS playback failed: {e}")
             self.stop_playback()
+
+    def speak(self, text: str, stop_event: threading.Event, language: str = None):
+        """Generates and plays speech with live interrupt/barge-in support."""
+        if not text:
+            return
+        if self.generate_audio_file(text, language):
+            self.play(stop_event)
