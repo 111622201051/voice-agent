@@ -7,6 +7,9 @@ tts:
   # When true, reply using the user's cloned voice (F5-TTS local, then Fish Audio).
   # Falls back to Edge neural voices automatically if cloning is unavailable.
   enable_voice_clone: true
+  # Re-capture the user's verified speech during conversation and use it as the
+  # live clone reference, so replies keep matching your tone, pitch and style.
+  clone_from_verified_speech: true
   tamil_voice: "ta-IN-PallaviNeural"
   english_voice: "en-IN-NeerjaExpressiveNeural"
   tanglish_voice: "en-IN-NeerjaExpressiveNeural"

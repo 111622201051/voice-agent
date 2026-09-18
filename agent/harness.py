@@ -1,10 +1,13 @@
 # agent/harness.py
+import os
+import json
+import time
 import threading
 import queue
 import numpy as np
 import sounddevice as sd
+import soundfile as sf
 import logging
-import time
 from enum import Enum
 
 # Optional UI bridge import
@@ -61,6 +64,49 @@ class AgentHarness:
             print("✅ [DEBUG] Models warmed up and ready.")
         except Exception as e:
             logger.warning(f"Model warmup note: {e}")
+
+    def _capture_clone_reference(self, audio_data, user_text):
+        """Re-captures the user's verified speech and updates the TTS clone reference.
+
+        After biometric verification, every quality utterance is saved as the
+        clone reference, so replies are spoken in the user's own tone/pitch/style.
+        """
+        if not getattr(self.tts, "enable_voice_clone", False):
+            return
+        if not getattr(self.tts, "clone_from_verified_speech", False):
+            return
+
+        try:
+            from audio.tts import VOICE_PROFILES_DIR, CLONE_AUDIO_PATH, CLONE_META_PATH
+
+            audio = np.asarray(audio_data, dtype=np.float32)
+            duration = len(audio) / 16000
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+
+            # Skip weak/short utterances so the reference is never degraded.
+            if duration < 2.0 or rms < 0.005:
+                logger.debug("Clone capture skipped: utterance too short or too quiet.")
+                return
+
+            os.makedirs(VOICE_PROFILES_DIR, exist_ok=True)
+            sf.write(CLONE_AUDIO_PATH, audio, 16000, subtype='PCM_16')
+
+            meta = {
+                "prompt_text": user_text.strip(),
+                "original_prompt": user_text.strip(),
+                "sample_rate": 16000,
+                "duration": duration,
+                "rms": rms,
+                "captured_from": "verified_conversation",
+                "recorded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            with open(CLONE_META_PATH, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+
+            if self.tts.reload_clone_reference():
+                print(f"🎭 [CLONE] Voice reference re-captured from your verified speech ({duration:.1f}s) -> {CLONE_AUDIO_PATH}")
+        except Exception as e:
+            logger.warning(f"Voice clone capture note: {e}")
 
     def _mic_listener(self):
         chunk_size = 512
@@ -267,6 +313,10 @@ class AgentHarness:
             print(f"\n👤 You said ({detected_lang}): '{user_text}'")
             if self.ui_bridge:
                 self.ui_bridge.add_message("user", user_text)
+
+            # Re-capture the verified user's voice for the TTS clone reference,
+            # so replies keep matching the user's tone, pitch and speaking style.
+            self._capture_clone_reference(audio_data, user_text)
 
             if user_text.lower() in ['quit', 'exit', 'stop', 'goodbye']:
                 print("👋 Goodbye!")

@@ -66,6 +66,7 @@ class TextToSpeech:
         self.clone_ref_bytes = None
         self.clone_prompt_text = ""
         self.enable_voice_clone = True
+        self.clone_from_verified_speech = True
 
         # Load configuration from config.yaml if available
         config_path = os.path.join(PROJECT_DIR, "config.yaml")
@@ -76,6 +77,7 @@ class TextToSpeech:
                     cfg = yaml.safe_load(f) or {}
                     tts_cfg = cfg.get("tts", {})
                     self.enable_voice_clone = bool(tts_cfg.get("enable_voice_clone", True))
+                    self.clone_from_verified_speech = bool(tts_cfg.get("clone_from_verified_speech", True))
                     if not api_key:
                         api_key = tts_cfg.get("fish_api_key", "")
                     if base_url == "https://api.fish.audio":
