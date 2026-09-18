@@ -1,0 +1,5 @@
+# Optional: fully-local high-fidelity voice cloning (F5-TTS)
+# Enables the `speak in your own cloned voice` path in audio/tts.py.
+# Heavy install; only needed if you want 100% offline voice cloning.
+# Requires the base install from requirements.txt first.
+f5-tts>=2.4.0

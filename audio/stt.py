@@ -79,7 +79,8 @@ class SpeechToText:
                 initial_prompt=prompt,
                 condition_on_previous_text=False,
                 temperature=0.0,
-                fp16=False
+                fp16=False,
+                without_timestamps=True,  # Faster: we only need the text
             )
             text = result.get("text", "").strip()
             detected_whisper_lang = result.get("language", "en")

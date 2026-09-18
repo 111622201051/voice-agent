@@ -5,6 +5,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Per-turn language steering added on top of the system prompt so replies
+# reliably mirror the detected language of the user's voice.
+LANGUAGE_INSTRUCTION = {
+    "ta": (
+        "Reply entirely in Tamil, using Tamil script (தமிழ்). "
+        "Keep it brief and natural for spoken voice. Do not use English."
+    ),
+    "en": "Reply entirely in English. Keep it brief and natural for spoken voice.",
+    "tanglish": (
+        "Reply naturally in Tanglish: Tamil words written in English letters "
+        "(e.g. 'naan sollunga', 'appdi iruku') mixed with English, matching "
+        "the user's exact mixed style. Keep it brief and natural for spoken voice."
+    ),
+}
+
 
 class LLMClient:
     def __init__(self, model_name="qwen2.5:3b"):
@@ -26,6 +41,12 @@ class LLMClient:
             
             # Prepare messages copy
             prepared_messages = list(messages)
+
+            # Strengthen language mirroring with a per-turn steering instruction
+            if language_style and language_style in LANGUAGE_INSTRUCTION:
+                prepared_messages.insert(
+                    0, {"role": "system", "content": LANGUAGE_INSTRUCTION[language_style]}
+                )
             
             response = ollama.chat(
                 model=self.model_name,

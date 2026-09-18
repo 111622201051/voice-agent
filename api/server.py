@@ -1,163 +1,26 @@
 # api/server.py
-import os
-import sys
-import io
-import base64
-import soundfile as sf
-import librosa
-import numpy as np
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+# Thin FastAPI entry point. All endpoints live in api.routes.
 import logging
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# Ensure UTF-8 output encoding for Windows command line / uvicorn
-try:
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-except Exception:
-    pass
-
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_DIR not in sys.path:
-    sys.path.append(PROJECT_DIR)
-
-from audio.stt import SpeechToText
-from audio.tts import TextToSpeech
-from agent.llm_client import LLMClient
-from auth.verification import SpeakerVerifier
-from agent.memory import MemoryManager
+from api.routes import router, init_engines, verifier_engine
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Voice Agent Live Call API")
 
-# Enable CORS for all remote network clients
+# Enable CORS for the Streamlit web UI (same machine / LAN client).
+# Note: wildcard origins must NOT send credentials, so allow_credentials is off.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-stt_engine = None
-tts_engine = None
-llm_engine = None
-verifier_engine = None
-memory_engine = None
+app.include_router(router)
 
-
-def init_engines():
-    global stt_engine, tts_engine, llm_engine, verifier_engine, memory_engine
-    if stt_engine is None:
-        logger.info("Initializing API AI engines...")
-        stt_engine = SpeechToText(model_size="small", device="cpu")
-        tts_engine = TextToSpeech()
-        llm_engine = LLMClient(model_name="qwen2.5:3b")
-        verifier_engine = SpeakerVerifier(threshold=0.60)
-        verifier_engine.load_profile()
-        memory_engine = MemoryManager()
-        system_instruction = (
-            "You are Shree, a fast and natural AI interviewer. "
-            "LANGUAGE RULES: "
-            "- If user speaks in Tamil (தமிழ்), reply strictly in natural spoken Tamil (தமிழ்). "
-            "- If user speaks in English, reply in clear, professional English. "
-            "- If user speaks in Tanglish (Tamil-English mixed), reply naturally in Tanglish matching their exact style. "
-            "Keep answers concise (1 to 2 short sentences). Do NOT use bullet points, asterisks (*), or markdown."
-        )
-        memory_engine.add_message("system", system_instruction)
-        logger.info("API AI engines ready.")
-
-
-def decode_audio_bytes(audio_bytes: bytes) -> np.ndarray:
-    audio_io = io.BytesIO(audio_bytes)
-    try:
-        data, sr = sf.read(audio_io, dtype='float32')
-    except Exception:
-        audio_io.seek(0)
-        data, sr = librosa.load(audio_io, sr=16000)
-    if data.ndim > 1:
-        data = np.mean(data, axis=1)
-    if sr != 16000:
-        data = librosa.resample(data, orig_sr=sr, target_sr=16000)
-    if len(data) < 16000:
-        data = np.pad(data, (0, 16000 - len(data)))
-    return data
-
-
-@app.get("/api/health")
-def health():
-    init_engines()
-    return {"status": "ok", "profile_loaded": len(verifier_engine.embeddings) > 0 if verifier_engine else False}
-
-
-@app.post("/api/process_voice")
-async def process_voice(audio: UploadFile = File(...)):
-    init_engines()
-    raw_bytes = await audio.read()
-    if not raw_bytes:
-        raise HTTPException(status_code=400, detail="Empty audio file")
-
-    print(f"[API] Received voice chunk ({len(raw_bytes)} bytes)")
-    audio_array = decode_audio_bytes(raw_bytes)
-
-    # 1. Biometric Authentication
-    verifier_engine.load_profile()
-    is_auth, score = verifier_engine.verify(audio_array)
-    print(f"[API] Verification: authorized={is_auth}, score={score:.2f}")
-
-    if not is_auth:
-        return {
-            "authorized": False,
-            "similarity": round(float(score), 3),
-            "user_text": "",
-            "assistant_text": "Access denied: Unknown speaker.",
-            "audio_base64": "",
-            "language": "en"
-        }
-
-    # 2. Multilingual STT (Whisper)
-    user_text, detected_lang = stt_engine.transcribe_with_language(audio_array)
-    print(f"[API] Transcribed STT ({detected_lang}): '{user_text}'")
-
-    if not user_text or len(user_text.strip()) < 2:
-        return {
-            "authorized": True,
-            "similarity": round(float(score), 3),
-            "user_text": "",
-            "assistant_text": "",
-            "audio_base64": "",
-            "language": detected_lang
-        }
-
-    # 3. LLM Reasoning with Language Mirroring
-    memory_engine.add_message("user", user_text)
-    history = memory_engine.get_recent_history(limit=10)
-    assistant_text = llm_engine.chat(history, language_style=detected_lang)
-    print(f"[API] Assistant Response ({detected_lang}): '{assistant_text}'")
-    memory_engine.add_message("assistant", assistant_text)
-
-    # 4. Neural TTS Generation with Language-Aware Voice
-    tts_bytes = await tts_engine.generate_audio_bytes_async(assistant_text, language=detected_lang)
-    audio_base64 = base64.b64encode(tts_bytes).decode("utf-8") if tts_bytes else ""
-    print(f"[API] Generated TTS audio ({len(tts_bytes)} bytes) for client playback.")
-
-    return {
-        "authorized": True,
-        "similarity": round(float(score), 3),
-        "user_text": user_text,
-        "assistant_text": assistant_text,
-        "audio_base64": audio_base64,
-        "language": detected_lang
-    }
-
-
-@app.post("/api/enroll")
-async def enroll_voice(s1: UploadFile = File(...), s2: UploadFile = File(...), s3: UploadFile = File(...)):
-    init_engines()
-    b1 = await s1.read()
-    b2 = await s2.read()
-    b3 = await s3.read()
-    samples = [decode_audio_bytes(b1), decode_audio_bytes(b2), decode_audio_bytes(b3)]
-    verifier_engine.enroll(samples)
-    return {"status": "enrolled", "count": len(verifier_engine.embeddings)}
+# Re-exported for backward compatibility with ui/app.py
+__all__ = ["app", "init_engines", "verifier_engine"]

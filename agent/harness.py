@@ -76,6 +76,7 @@ class AgentHarness:
         interrupt_buffer = []
         interrupt_candidate_speaking = False
         interrupt_speech_samples = 0
+        interrupt_last_check_samples = 0
         interrupt_silence_counter = 0
 
         print("🎧 [DEBUG] Mic listener thread started (Always On, True Barge-In with Biometric Verification).")
@@ -101,14 +102,19 @@ class AgentHarness:
                             interrupt_buffer = list(pre_speech_chunks)
                             interrupt_candidate_speaking = True
                             interrupt_speech_samples = len(interrupt_buffer) * chunk_size
+                            interrupt_last_check_samples = 0
                             interrupt_silence_counter = 0
 
                         interrupt_buffer.append(chunk)
                         interrupt_speech_samples += chunk_size
                         interrupt_silence_counter = 0
 
-                        # Quick speaker biometric check once we have ~0.5s of audio (>= 8000 samples)
-                        if interrupt_speech_samples >= 8000:
+                        # Quick speaker biometric check once we have ~0.5s of audio (>= 8000 samples).
+                        # Re-check every ~125ms afterwards, so a genuine barge-in that was only
+                        # borderline at 0.5s still gets confirmed before the 0.75s non-user cutoff.
+                        if (interrupt_speech_samples >= 8000
+                                and (interrupt_speech_samples - interrupt_last_check_samples) >= 2000):
+                            interrupt_last_check_samples = interrupt_speech_samples
                             candidate_audio = np.concatenate(interrupt_buffer)
                             is_auth, score = self.verifier.verify(candidate_audio, min_threshold=0.58)
 
@@ -130,6 +136,7 @@ class AgentHarness:
                                 interrupt_buffer = []
                                 interrupt_candidate_speaking = False
                                 interrupt_speech_samples = 0
+                                interrupt_last_check_samples = 0
                                 interrupt_silence_counter = 0
                             else:
                                 # If accumulated >= 12000 samples (~0.75s) and still not verified:
@@ -139,6 +146,7 @@ class AgentHarness:
                                     interrupt_buffer = []
                                     interrupt_candidate_speaking = False
                                     interrupt_speech_samples = 0
+                                    interrupt_last_check_samples = 0
                                     interrupt_silence_counter = 0
 
                     elif interrupt_candidate_speaking:
@@ -150,6 +158,7 @@ class AgentHarness:
                             interrupt_buffer = []
                             interrupt_candidate_speaking = False
                             interrupt_speech_samples = 0
+                            interrupt_last_check_samples = 0
                             interrupt_silence_counter = 0
                     else:
                         # Update rolling pre-speech ring buffer while speaking
@@ -167,6 +176,9 @@ class AgentHarness:
                     sample_counter = 0
                     interrupt_buffer = []
                     interrupt_candidate_speaking = False
+                    interrupt_speech_samples = 0
+                    interrupt_last_check_samples = 0
+                    interrupt_silence_counter = 0
 
                 # -------------------------------------------------------------
                 # CASE 3: IDLE / LISTENING (AgentState.IDLE)
@@ -301,12 +313,10 @@ class AgentHarness:
             self.state = AgentState.IDLE
             self.tts_stop_event.clear()
 
-            # Drain any stale audio queued during speaking or thinking
-            while not self.audio_queue.empty():
-                try:
-                    self.audio_queue.get_nowait()
-                except queue.Empty:
-                    break
+            # NOTE: The queue is NOT drained here on purpose. A verified
+            # barge-in may have just queued the user's fresh utterance while
+            # this response was being interrupted. Draining would silently
+            # drop those first (interrupted) words.
 
             if self.ui_bridge:
                 self.ui_bridge.set_status("Idle")

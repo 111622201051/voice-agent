@@ -65,6 +65,7 @@ class TextToSpeech:
         self.local_f5_model = None
         self.clone_ref_bytes = None
         self.clone_prompt_text = ""
+        self.enable_voice_clone = True
 
         # Load configuration from config.yaml if available
         config_path = os.path.join(PROJECT_DIR, "config.yaml")
@@ -74,6 +75,7 @@ class TextToSpeech:
                 with open(config_path, "r", encoding="utf-8") as f:
                     cfg = yaml.safe_load(f) or {}
                     tts_cfg = cfg.get("tts", {})
+                    self.enable_voice_clone = bool(tts_cfg.get("enable_voice_clone", True))
                     if not api_key:
                         api_key = tts_cfg.get("fish_api_key", "")
                     if base_url == "https://api.fish.audio":
@@ -224,7 +226,7 @@ class TextToSpeech:
         """Generates audio bytes in memory for browser/UI bridge playback."""
         if not text:
             return b""
-        if self._generate_fish_audio(text) or self._generate_local_f5(text):
+        if self.enable_voice_clone and (self._generate_fish_audio(text) or self._generate_local_f5(text)):
             try:
                 with open(self.temp_file, "rb") as f:
                     return f.read()
@@ -246,7 +248,7 @@ class TextToSpeech:
         """Asynchronous audio generation for callers with language-aware voice selection."""
         if not text:
             return b""
-        if self._generate_fish_audio(text) or self._generate_local_f5(text):
+        if self.enable_voice_clone and (self._generate_fish_audio(text) or self._generate_local_f5(text)):
             with open(self.temp_file, "rb") as f:
                 return f.read()
         selected_voice = voice or self.select_voice(text, language)
@@ -269,7 +271,7 @@ class TextToSpeech:
         success = False
 
         # 1. Try Local Zero-Shot Voice Cloning (100% Free & Offline)
-        if self.clone_ref_bytes and language not in ["ta"]:
+        if self.enable_voice_clone and self.clone_ref_bytes and language not in ["ta"]:
             print("🎭 [TTS] Synthesizing speech with Local Cloned Voice Profile...")
             success = self._generate_local_f5(text)
             if not success:

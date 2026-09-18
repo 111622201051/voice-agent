@@ -4,6 +4,9 @@ agent:
 
 tts:
   engine: "edge_tts"
+  # When true, reply using the user's cloned voice (F5-TTS local, then Fish Audio).
+  # Falls back to Edge neural voices automatically if cloning is unavailable.
+  enable_voice_clone: true
   tamil_voice: "ta-IN-PallaviNeural"
   english_voice: "en-IN-NeerjaExpressiveNeural"
   tanglish_voice: "en-IN-NeerjaExpressiveNeural"
@@ -21,4 +24,3 @@ vad:
 verification:
   threshold: 0.60
   interrupt_threshold: 0.58
-

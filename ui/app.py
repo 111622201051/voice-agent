@@ -147,6 +147,7 @@ with tab_call:
             let silenceCount = 0;
             let speechCount = 0;
             let currentAudioPlayer = null;
+            let turnToken = 0; // monotonically-increasing turn id; stale responses are ignored
             
             // Resolve API host dynamically (handling remote IP, iframe origin, etc.)
             let apiHost = window.location.hostname;
@@ -279,7 +280,8 @@ with tab_call:
                     };
 
                     source.connect(scriptProcessor);
-                    scriptProcessor.connect(audioContext.destination);
+                    // NOTE: intentionally NOT connected to audioContext.destination —
+                    // routing the mic to the speakers would create a feedback/echo loop.
 
                     isCalling = true;
                     document.getElementById("btn-toggle").className = "btn btn-stop";
@@ -308,10 +310,12 @@ with tab_call:
 
             async function sendVoiceQuery(blob) {
                 if (!isCalling) return;
+                const myToken = ++turnToken;  // invalidate any in-flight older responses
                 setOrbState("thinking", "Thinking & Generating...");
 
                 const formData = new FormData();
                 formData.append("audio", blob, "voice.wav");
+                formData.append("turn_token", myToken);
 
                 try {
                     const response = await fetch(API_URL, {
@@ -319,6 +323,10 @@ with tab_call:
                         body: formData
                     });
                     const data = await response.json();
+
+                    // Ignore responses from turns that have already been superseded
+                    // by a newer user utterance (prevents overlapping old/new AI audio).
+                    if (data.turn_token !== undefined && Number(data.turn_token) !== myToken) return;
 
                     if (!data.authorized) {
                         setOrbState("idle", "🚫 Unknown Speaker");
@@ -345,13 +353,28 @@ with tab_call:
 
                         const audioBlob = new Blob([arrayBuffer], { type: 'audio/mp3' });
                         const audioUrl = URL.createObjectURL(audioBlob);
+
+                        // Hard-stop any previously playing AI response before starting the new one
+                        if (currentAudioPlayer) {
+                            currentAudioPlayer.pause();
+                            currentAudioPlayer.src = "";
+                            currentAudioPlayer = null;
+                        }
                         currentAudioPlayer = new Audio(audioUrl);
 
+                        // Barge-in: the moment the user speaks again, halt this playback
                         currentAudioPlayer.onended = () => {
-                            if (isCalling) setOrbState("listening", "Listening... Speak naturally");
+                            if (!isCalling) return;
+                            if (turnToken === myToken) setOrbState("listening", "Listening... Speak naturally");
                         };
 
-                        await currentAudioPlayer.play();
+                        await currentAudioPlayer.play().catch(() => {});
+                        if (turnToken !== myToken) {
+                            // A newer turn arrived while this audio was starting; discard it
+                            currentAudioPlayer.pause();
+                            currentAudioPlayer.src = "";
+                            currentAudioPlayer = null;
+                        }
                     } else {
                         if (isCalling) setOrbState("listening", "Listening... Speak naturally");
                     }
