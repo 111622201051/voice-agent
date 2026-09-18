@@ -68,6 +68,7 @@ class TextToSpeech:
         self.enable_voice_clone = True
         self.clone_from_verified_speech = True
         self.require_gpu_for_clone = True
+        self._cpu_clone_notice_shown = False
 
         # Load configuration from config.yaml if available
         config_path = os.path.join(PROJECT_DIR, "config.yaml")
@@ -172,7 +173,11 @@ class TextToSpeech:
         if not F5_TTS_AVAILABLE or not os.path.exists(CLONE_AUDIO_PATH):
             return False
         if self.require_gpu_for_clone and not torch.cuda.is_available():
-            print("ℹ️  [TTS] Skipped local voice cloning - no NVIDIA GPU found (CPU synth is ~10 min/reply).")
+            if not self._cpu_clone_notice_shown:
+                self._cpu_clone_notice_shown = True
+                print("ℹ️  Running on CPU - replies use the fast neural voice.")
+                print("   (Want replies in YOUR cloned voice? Add a Fish Audio API")
+                print("    key in config.yaml, or use a CUDA GPU. Not an error!)")
             return False
 
         try:

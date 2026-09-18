@@ -10,8 +10,9 @@ tts:
   # Re-capture the user's verified speech during conversation and use it as the
   # live clone reference, so replies keep matching your tone, pitch and style.
   clone_from_verified_speech: true
-  # Local F5-TTS clone needs an NVIDIA GPU. On CPU it takes ~10 min per reply,
-  # which freezes the agent. Keep this true unless you have a CUDA GPU.
+  # Local F5-TTS clone needs an NVIDIA GPU. On CPU it takes ~4-10 min per reply,
+  # which freezes the agent. Keep true unless you knowingly want CPU cloning.
+  # CPU machines simply get the fast Edge neural voice (fully automatic).
   require_gpu_for_clone: true
   tamil_voice: "ta-IN-PallaviNeural"
   english_voice: "en-IN-NeerjaExpressiveNeural"
