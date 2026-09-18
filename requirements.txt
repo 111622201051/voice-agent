@@ -1,0 +1,13 @@
+webrtcvad-wheels>=2.0.14
+torch>=2.0.0
+torchaudio>=2.0.0
+openai-whisper
+silero-vad
+sounddevice
+soundfile
+edge-tts
+pygame
+ollama
+sqlalchemy
+resemblyzer>=0.1.4
+streamlit

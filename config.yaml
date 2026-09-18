@@ -1,0 +1,24 @@
+agent:
+  name: "Shree"
+  llm_model: "qwen2.5:3b"
+
+tts:
+  engine: "edge_tts"
+  tamil_voice: "ta-IN-PallaviNeural"
+  english_voice: "en-IN-NeerjaExpressiveNeural"
+  tanglish_voice: "en-IN-NeerjaExpressiveNeural"
+  fish_base_url: "https://api.fish.audio"
+  clone_audio_path: "data/voice_profiles/clone_reference.wav"
+  clone_meta_path: "data/voice_profiles/clone_reference.json"
+
+stt:
+  model_size: "small"
+  device: "cpu"
+
+vad:
+  threshold: 0.40
+
+verification:
+  threshold: 0.60
+  interrupt_threshold: 0.58
+
